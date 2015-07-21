@@ -12,20 +12,22 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 
-
 public class Project121DataSiftClient
-{
-	static ObjectMapper mapper = new ObjectMapper();
-    // the root node to keep the json array
-    static JsonNode rootNode = mapper.createArrayNode();
-    // File to write
-    static File outJson = new File("output/outjson.json");
-	
+{    
 	// Subscription handler
     public static class Subscription extends StreamSubscription {
+    	ObjectMapper mapper = new ObjectMapper();
+    	// file prefix and files created counter
+    	String fileNamePrefix = null;
+    	int maxInteractionsPerFile;
+    	int filesCreated = 1;
+    	// main Array container node
+    	ArrayNode rootNode = mapper.createArrayNode();
 
-        public Subscription(Stream stream) {
+        public Subscription(Stream stream, String fileNamePrefix, int maxInteractionsPerFile) {
             super(stream);
+            this.fileNamePrefix = fileNamePrefix;
+            this.maxInteractionsPerFile = maxInteractionsPerFile;
         }
      
         public void onDataSiftLogMessage(DataSiftMessage di) {
@@ -34,18 +36,18 @@ public class Project121DataSiftClient
      
         public void onMessage(Interaction i) {
             System.out.println("INTERACTION:\n" + i);
+            // add the interaction
+            rootNode.add(i.getData());
             
-            if (rootNode.size() < 1){
-                ((ArrayNode)rootNode).add(i.getData());
-            }
-            else{
+            if(rootNode.size() == maxInteractionsPerFile){
             	try {
-					mapper.writeValue(outJson, rootNode);
+					mapper.writeValue(new File("output", fileNamePrefix+filesCreated+".json"), rootNode);
+					this.rootNode = mapper.createArrayNode();
+					this.filesCreated++;
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-            	System.exit(0);
             }
             
         }
@@ -66,25 +68,52 @@ public class Project121DataSiftClient
             // TODO: do something useful..!
         }
     }
-
+    
     public static void main(String[] args) {
         
-        // TODO: Enter your username and API key
-        DataSiftConfig config = new DataSiftConfig("user", "xxxxx");
-        DataSiftClient datasift = new DataSiftClient(config);
+		String userName = null;
+		String apiKey = null;
+		String csdl = null;
+		// set defaults
+		String fileNamePrefix = "interactions";
+		int maxInteractionsPerFile = 3; 
+		
+		for (int i=0; i<args.length; i++) {
+			String opt = args[i];
+			if ("-username".equals(opt)) {
+				userName = args[++i];
+			}
+			else if ("-apikey".equals(opt)) {
+				apiKey = args[++i];
+			}
+			else if ("-csdl".equals(opt)) {
+				csdl = args[++i];
+			}
+			else if ("-fileprefix".equals(opt)) {
+				fileNamePrefix = args[++i];
+			}
+			else if ("-maxtweetsperfile".equals(opt)) {
+				maxInteractionsPerFile = Integer.parseInt(args[++i]);
+			}
+
+		}
+		
+        // Now enter the username and API key and instantiate the client
+        DataSiftConfig config = new DataSiftConfig(userName, apiKey);
+        DataSiftClient datasift = new DataSiftClient(config);		
      
         try {
             
-            // Compile filter looking for mentions of brands
-            String csdl = "interaction.content contains_any \"Samsung\"";
+            // Compile filter passed in the configuration
             Stream stream = datasift.compile(csdl).sync();
             
             datasift.liveStream().onError(new ErrorHandler()); // handles stream errors
             datasift.liveStream().onStreamEvent(new DeleteHandler()); // handles data deletes
              
             // Subscribe to the stream
-            datasift.liveStream().subscribe(new Subscription(stream));
+            datasift.liveStream().subscribe(new Subscription(stream, fileNamePrefix, maxInteractionsPerFile));
             
+            // 
         } 
         catch(Exception ex)
         {
