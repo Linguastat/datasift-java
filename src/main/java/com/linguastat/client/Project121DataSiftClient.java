@@ -14,20 +14,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Project121DataSiftClient
 {    
+	
 	// Subscription handler
     public static class Subscription extends StreamSubscription {
-    	ObjectMapper mapper = new ObjectMapper();
-    	// file prefix and files created counter
-    	String fileNamePrefix = null;
-    	int maxInteractionsPerFile;
-    	int filesCreated = 1;
-    	// main Array container node
-    	ArrayNode rootNode = mapper.createArrayNode();
+    	DataSiftOutputController oc = null;
 
-        public Subscription(Stream stream, String fileNamePrefix, int maxInteractionsPerFile) {
+        public Subscription(Stream stream, DataSiftOutputController oc) {
             super(stream);
-            this.fileNamePrefix = fileNamePrefix;
-            this.maxInteractionsPerFile = maxInteractionsPerFile;
+        	this.oc = oc;
+
         }
      
         public void onDataSiftLogMessage(DataSiftMessage di) {
@@ -37,19 +32,7 @@ public class Project121DataSiftClient
         public void onMessage(Interaction i) {
             System.out.println("INTERACTION:\n" + i);
             // add the interaction
-            rootNode.add(i.getData());
-            
-            if(rootNode.size() == maxInteractionsPerFile){
-            	try {
-					mapper.writeValue(new File("output", fileNamePrefix+filesCreated+".json"), rootNode);
-					this.rootNode = mapper.createArrayNode();
-					this.filesCreated++;
-				} catch (IOException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-            }
-            
+            oc.appendInteraction(i.getData());
         }
     }
      
@@ -63,9 +46,18 @@ public class Project121DataSiftClient
      
     // Error handler
     public static class ErrorHandler extends ErrorListener {
+    	DataSiftOutputController oc = null;
+    	
+    	public ErrorHandler(DataSiftOutputController oc){
+    		super();
+    		this.oc = oc;
+    	}
+    	
         public void exceptionCaught(Throwable t) {
+        	// write what is contained in the ArrayNode to file
+    		oc.writeToFile();
+        	// print the stack trace
             t.printStackTrace();
-            // TODO: do something useful..!
         }
     }
     
@@ -100,18 +92,23 @@ public class Project121DataSiftClient
 		
         // Now enter the username and API key and instantiate the client
         DataSiftConfig config = new DataSiftConfig(userName, apiKey);
-        DataSiftClient datasift = new DataSiftClient(config);		
+        DataSiftClient datasift = new DataSiftClient(config);
+        
+        // now declare an output writer
      
         try {
             
             // Compile filter passed in the configuration
             Stream stream = datasift.compile(csdl).sync();
             
-            datasift.liveStream().onError(new ErrorHandler()); // handles stream errors
+            // initialize the output controller
+            DataSiftOutputController oc = new DataSiftOutputController(fileNamePrefix, maxInteractionsPerFile);
+            
+            datasift.liveStream().onError(new ErrorHandler(oc)); // handles stream errors
             datasift.liveStream().onStreamEvent(new DeleteHandler()); // handles data deletes
              
             // Subscribe to the stream
-            datasift.liveStream().subscribe(new Subscription(stream, fileNamePrefix, maxInteractionsPerFile));
+            datasift.liveStream().subscribe(new Subscription(stream, oc));
             
             // 
         } 
